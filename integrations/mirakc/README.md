@@ -39,9 +39,17 @@ sudo install -m 0755 build/core-integration/pixd build/core-integration/pixctl \
 
 [`pixd.service.example`](pixd.service.example) は systemd の起動例。`REPLACE_SERIAL` と assets のパスを実機に合わせ、`pixd` 用ユーザー・グループを作成してからインストールする。`RuntimeDirectoryMode=0770` と `--group` は同じ共有ソケット方式の設定である。`pixctl --instance dt295 --runtime-dir /run/pixd --group status` の `context.state=ready` と receiver `state=free` を確認してから mirakc を起動する。USB抜き差し後の自動復旧は保証していない。pixd のプロセス状態、socket、実際の新規取得を確認して再起動を判断する。
 
-[`config.example.yml`](config.example.yml) はGRのみの運用例。T27は実際の地域の物理チャンネルに置き換える。mirakc の `{{{channel_type}}}`、`{{{channel}}}`、`{{{duration}}}` は公式仕様どおりの tuner command 変数である。`decoded: true` は `dt295_decode_packet()` がパケットの機器由来AES処理を行い、TS scrambling bitsをクリアしてから出力する設計に対応する。これはB-CASや有料放送の全サービス復号を実機なしに保証しない。実機ではPESのスクランブル状態と実際の再生・録画を確かめる。外部B25/PCSC/カードリーダーはこの構成には含めない。
+[`config.example.yml`](config.example.yml) はGRのみの運用例。T27は実際の地域の物理チャンネルに置き換える。mirakc の `{{{channel_type}}}`、`{{{channel}}}`、`{{{duration}}}` は公式仕様どおりの tuner command 変数である。デスクランブルの経路と実機での判定は次節に記載する。
 
-mirakc の標準 `service-filter` と `program-filter` を使い、追加の `decode-filter` は設定しない。サービス一覧にはPAT/SDT/NIT、サービスストリームにはPMT/AV、EPGにはEITと時刻情報の安定供給が必要で、単にTSが出るだけでは完了しない。EPGジョブは空きチューナーを必要とし、長時間の視聴・録画で専有されると遅れる。実機で `/api/services`、番組表、サービス別視聴、録画ファイルを順に確認する。
+## デスクランブルと本体内カード
+
+PIX-DT295では本体に挿したB-CASカードを使う構成が第一候補である。現行 `pixd` のDT295 receiverは、受信開始時に本体内カードを初期化・activateし、受け取ったTSを `dt295_decode_packet()` に通してからIPCへ渡す。[receiver実装](../../pix-dt295-receiver-adapter.cpp) はカード処理に失敗すると `NO_CARD` を返す。TS処理は機器由来のAES転送暗号を解き、対応するpacketのscrambling bitsをクリアする。以前のDT295実機検証では地上波T27の保存TSについてscramble=0を観測しているが、**今回のmirakc統合・Linux・BS/CS・有料サービスでの復号成功は未検証**である。`decoded: true` は復号済みPESをチューナーが出すという[mirakcの契約](https://github.com/mirakc/mirakc/blob/main/docs/config.md#tuners)に合わせた設定で、復号成功そのものを保証するスイッチではない。
+
+参照した[既存のdtv-tuner構成](https://github.com/yudejp/nrt1sh1.tun.y2e.org/tree/main/dtv-tuner)は、別機種の生TSを `decode-filter` → B25サーバー → PC/SC外付けカードリーダーへ通す。PIX-DT295の内蔵カードはホストのPC/SC readerとして公開されず、現行 `pixctl` の `card-atr`/`card-apdu`/`card-reset` も未対応である。このため、そのB25/pcscd proxyをDT295内蔵カードへ接続することはできない。DT295のTSを外部B25にも通す二重処理は行わず、両設定例は `decoded: true` と空の `filters.decode-filter.command` を明示する。別の外付けカードを使うB25構成を混ぜる場合も、現行DT295出力が外部B25の入力として使えることは確認できていない。
+
+実機では短時間のTSを保存し、188バイト同期とTS headerのscrambling_controlを検査する。受信中ならホストから `pixctl --instance dt295 --runtime-dir /run/pixd --group card-status` で本体内カードの `present=yes` を確認できる場合がある。receiverを開いていない待機中や処理の競合時は `present=unknown` が返り得るため、これはカード不在の判定には使わない。ヘッダー検査だけでは映像・音声の復号成功を証明できないので、最後にサービス別のPESを実際に再生・短時間録画して確認する。`NO_CARD`、スクランブルが残る、サービスごとにAVが欠ける場合はその段階を切り分け、`decoded` を盲目的に変更しない。生TS・鍵・カード識別情報をissueやログへ添付しない。
+
+mirakc の標準 `service-filter` と `program-filter` を使い、外部 `decode-filter` は実行しない。サービス一覧にはPAT/SDT/NIT、サービスストリームにはPMT/AV、EPGにはEITと時刻情報の安定供給が必要で、単にTSが出るだけでは完了しない。EPGジョブは空きチューナーを必要とし、長時間の視聴・録画で専有されると遅れる。実機で `/api/services`、番組表、サービス別視聴、録画ファイルを順に確認する。
 
 [`config.satellite.example.yml`](config.satellite.example.yml) はBS/CSチャンネルを `disabled: true` にした検証用設定。GRと衛星を同じ `tuners` エントリーへ登録する。衛星実機検証が済むまでチャンネルを有効化しない。BSの既存検証範囲とCSの制約は以下を参照する。
 
@@ -82,6 +90,7 @@ sudo systemctl start pixd
 pixctl --instance dt295 --runtime-dir /run/pixd --group status
 pix-mirakc-tuner --type GR --channel T27 --duration 15 --instance dt295 --runtime-dir /run/pixd --group > /tmp/dt295-gr.ts 2> /tmp/dt295-gr.log
 python3 -c 'import sys; p=open(sys.argv[1],"rb").read(); assert p and len(p)%188==0 and all(p[i]==0x47 for i in range(0,len(p),188)); print(len(p)//188,"packets")' /tmp/dt295-gr.ts
+python3 -c 'import sys; p=open(sys.argv[1],"rb").read(); bad=[i//188 for i in range(0,len(p),188) if p[i+3]&0xc0]; print("scrambled packets:",len(bad)); sys.exit(bool(bad))' /tmp/dt295-gr.ts
 pixctl --instance dt295 --runtime-dir /run/pixd --group status
 pix-mirakc-tuner --type GR --channel T27 --duration 15 --instance dt295 --runtime-dir /run/pixd --group > /tmp/dt295-gr-again.ts 2> /tmp/dt295-gr-again.log
 docker compose -f integrations/mirakc/docker-compose.example.yml up -d

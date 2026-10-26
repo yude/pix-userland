@@ -17,6 +17,7 @@ channels:
     channel: 'CS22@29024'
     disabled: true
 tuners:
+  # One tuner entry represents one physical USB tuner, including satellite modes.
   - name: PIX-DT295-GR
     types: [GR, BS, CS]
     command: >-
@@ -28,4 +29,8 @@ tuners:
       --runtime-dir /run/pixd
       --group
     decoded: true
-  # One tuner entry represents one physical USB tuner, including satellite modes.
+filters:
+  # DT295 handles its inserted card internally; satellite decoding is not
+  # verified by this sample.  CS may stop at the current ECM routing limit.
+  decode-filter:
+    command: ''

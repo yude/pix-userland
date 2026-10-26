@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,7 +46,7 @@ def main():
                                                      "config.satellite.example.yml"),
                         default="config.example.yml")
     args = parser.parse_args()
-    name = f"pix-mirakc-test-{os.getpid()}"
+    name = f"pix-mirakc-test-{uuid.uuid4().hex[:12]}"
     with tempfile.TemporaryDirectory(prefix="pix-mirakc-docker-") as work:
         root = Path(work)
         fixture = root / "synthetic.ts"
@@ -72,15 +73,17 @@ def main():
             services = wait_for(lambda: read_json(base + "/api/services") or None)
             assert any(service["serviceId"] == 101 for service in services), services
             wait_for(lambda: read_json(base + "/api/tuners")[0]["isFree"])
-            for _ in range(2):
-                with urlopen(base + "/api/channels/GR/T27/stream?decode=0", timeout=5) as stream:
+            # Both decode modes must stream with decoded=true and without an
+            # external B25 filter.  The synthetic TS cannot prove real decoding.
+            for decode in (0, 1):
+                with urlopen(base + f"/api/channels/GR/T27/stream?decode={decode}", timeout=5) as stream:
                     data = stream.read(188 * 20)
                 assert len(data) == 188 * 20
                 # A shared tuner may start a subscriber in the middle of a packet.
                 assert any(all(data[offset + index * 188] == 0x47 for index in range(10))
                            for offset in range(188))
                 wait_for(lambda: read_json(base + "/api/tuners")[0]["isFree"])
-            print("mirakc config, API stream/disconnect/reuse, and service scan passed")
+            print("mirakc config, decode=0/1 API streams, disconnect/reuse, and service scan passed")
         finally:
             subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=15)
 

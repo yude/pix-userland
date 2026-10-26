@@ -19,4 +19,11 @@ tuners:
       --instance dt295
       --runtime-dir /run/pixd
       --group
+    # pixd uses the card inserted in the DT295 during capture.  The tuner
+    # command is expected to emit clear PES, subject to real-device validation.
     decoded: true
+filters:
+  # The built-in card is not a PC/SC reader.  Do not pass this stream through
+  # the external B25/pcscd proxy used by other tuners.
+  decode-filter:
+    command: ''
