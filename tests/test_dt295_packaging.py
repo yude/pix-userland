@@ -316,7 +316,10 @@ class TestDT295Packaging(unittest.TestCase):
                      "core-integration/tools/pix_ts.cpp", "pix-dt181-receiver-adapter.cpp",
                      "pix-dt295-receiver-adapter.cpp", "tests/pix_dt295_adapter_lifecycle_proof.cpp",
                      "tools/build-windows.sh", "core-integration/tests/windows_os_thread_proof.c",
-                     "tests/test_windows_runtime.py"):
+                     "tests/test_windows_runtime.py", "integrations/mirakc/pix-mirakc-tuner",
+                     "integrations/mirakc/pixd.service.example",
+                     "integrations/mirakc/config.example.yml",
+                     "integrations/mirakc/tests/test_ipc.py"):
       self.assertIn(required, names)
     for required in ("assets/fpga.bin", "assets/bootstrap.bin", "assets/validation.bin", "assets/dt295.assets"):
       self.assertIn(required, names)

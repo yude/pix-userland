@@ -324,6 +324,16 @@ target_link_options(pix_public_runtime_proof PRIVATE
     -Wl,--wrap=pthread_create)
 add_dependencies(pix_public_runtime_proof pixd_fixture pix-ts pixctl)
 add_test(NAME pix_public_runtime_proof COMMAND pix_public_runtime_proof)
+find_package(Python3 QUIET COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+    add_test(NAME pix_mirakc_ipc_proof
+        COMMAND "${Python3_EXECUTABLE}"
+            "${PIX_SOURCE_DIR}/integrations/mirakc/tests/test_ipc.py"
+            --pixd-fixture "$<TARGET_FILE:pixd_fixture>"
+            --pix-ts "$<TARGET_FILE:pix-ts>"
+            --pixctl "$<TARGET_FILE:pixctl>")
+    set_tests_properties(pix_mirakc_ipc_proof PROPERTIES TIMEOUT 40)
+endif()
 endif()
 
 if(PIX_EMBEDDED_ASSETS AND NOT WIN32)

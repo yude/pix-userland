@@ -1,0 +1,22 @@
+# Copy to config.yml and replace T27 with a local physical GR channel.
+server:
+  addrs:
+    - http: '0.0.0.0:40772'
+epg:
+  cache-dir: /var/lib/mirakc/epg
+channels:
+  - name: GR-T27-example
+    type: GR
+    channel: 'T27'
+tuners:
+  - name: PIX-DT295-GR
+    types: [GR]
+    command: >-
+      /usr/local/bin/pix-mirakc-tuner
+      --type {{{channel_type}}}
+      --channel {{{channel}}}
+      --duration {{{duration}}}
+      --instance dt295
+      --runtime-dir /run/pixd
+      --group
+    decoded: true

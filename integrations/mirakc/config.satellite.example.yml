@@ -1,0 +1,31 @@
+# Experimental satellite extension. Enable only after the hardware checks in README.md.
+server:
+  addrs:
+    - http: '0.0.0.0:40772'
+epg:
+  cache-dir: /var/lib/mirakc/epg
+channels:
+  - name: GR-T27-example
+    type: GR
+    channel: 'T27'
+  - name: BS01-slot0-example
+    type: BS
+    channel: 'BS01_0'
+    disabled: true
+  - name: CS22-tsid-example
+    type: CS
+    channel: 'CS22@29024'
+    disabled: true
+tuners:
+  - name: PIX-DT295-GR
+    types: [GR, BS, CS]
+    command: >-
+      /usr/local/bin/pix-mirakc-tuner
+      --type {{{channel_type}}}
+      --channel {{{channel}}}
+      --duration {{{duration}}}
+      --instance dt295
+      --runtime-dir /run/pixd
+      --group
+    decoded: true
+  # One tuner entry represents one physical USB tuner, including satellite modes.

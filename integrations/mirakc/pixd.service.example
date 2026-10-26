@@ -1,0 +1,19 @@
+# Replace REPLACE_SERIAL and the assets path before installing.
+[Unit]
+Description=PIX-DT295 USB owner for mirakc
+After=systemd-udevd.service
+
+[Service]
+Type=simple
+User=pixd
+Group=pixd
+RuntimeDirectory=pixd
+RuntimeDirectoryMode=0770
+ExecStart=/usr/local/bin/pixd --device serial:REPLACE_SERIAL --assets /opt/pix-userland/assets --instance dt295 --runtime-dir /run/pixd --group
+Restart=on-failure
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

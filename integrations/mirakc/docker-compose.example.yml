@@ -1,0 +1,28 @@
+# Host pixd owns USB. Use a Linux x86_64 static pix-ts binary in ./bin.
+# Set PIX_UID and PIX_GID to the pixd socket owner's IDs, or grant the
+# container's supplementary PIX_RUNTIME_GID access to /run/pixd.
+services:
+  mirakc:
+    image: docker.io/mirakc/mirakc:alpine
+    init: true
+    restart: unless-stopped
+    user: '${PIX_UID}:${PIX_GID}'
+    group_add:
+      - '${PIX_RUNTIME_GID}'
+    ports:
+      - '40772:40772'
+    environment:
+      TZ: Asia/Tokyo
+      RUST_LOG: info
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:40772/api/tuners']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    volumes:
+      - ./config.example.yml:/etc/mirakc/config.yml:ro
+      - ./pix-mirakc-tuner:/usr/local/bin/pix-mirakc-tuner:ro
+      - ./bin/pix-ts:/usr/local/bin/pix-ts:ro
+      - /run/pixd:/run/pixd
+      - ./epg:/var/lib/mirakc/epg

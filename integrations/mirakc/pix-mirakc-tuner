@@ -1,0 +1,103 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+# A validation-only adapter.  exec preserves the TS byte stream and signals.
+LC_ALL=C
+export LC_ALL
+
+error() { printf 'pix-mirakc-tuner: %s\n' "$1" >&2; exit 2; }
+usage() {
+    printf '%s\n' 'usage: pix-mirakc-tuner --type GR|BS|CS --channel CH --duration SECONDS|- --instance TOKEN [--runtime-dir DIR] [--group] [--slot 0..7|--tsid 1..65534]' >&2
+    exit 2
+}
+
+type= channel= duration= instance= runtime_dir= selection= selection_value=
+group= no_type=1 no_channel=1 no_duration=1 no_instance=1 no_runtime=1
+while [ "$#" -gt 0 ]; do
+    option=$1
+    case $option in
+        --type|--channel|--duration|--instance|--runtime-dir|--slot|--tsid)
+            [ "$#" -ge 2 ] || usage
+            value=$2
+            [ -n "$value" ] || error "empty $option"
+            case $option in
+                --type) [ "$no_type" = 1 ] || error 'duplicate --type'; type=$value; no_type=0 ;;
+                --channel) [ "$no_channel" = 1 ] || error 'duplicate --channel'; channel=$value; no_channel=0 ;;
+                --duration) [ "$no_duration" = 1 ] || error 'duplicate --duration'; duration=$value; no_duration=0 ;;
+                --instance) [ "$no_instance" = 1 ] || error 'duplicate --instance'; instance=$value; no_instance=0 ;;
+                --runtime-dir) [ "$no_runtime" = 1 ] || error 'duplicate --runtime-dir'; runtime_dir=$value; no_runtime=0 ;;
+                --slot|--tsid) [ -z "$selection" ] || error 'satellite selection specified twice'; selection=$option; selection_value=$value ;;
+            esac
+            shift 2 ;;
+        --group) [ -z "$group" ] || error 'duplicate --group'; group=1; shift ;;
+        *) usage ;;
+    esac
+done
+[ "$no_type" = 0 ] && [ "$no_channel" = 0 ] && [ "$no_duration" = 0 ] && [ "$no_instance" = 0 ] || usage
+case $type in GR|BS|CS) ;; *) error 'type must be GR, BS or CS' ;; esac
+case $instance in
+    [a-zA-Z0-9]*) case $instance in *[!a-zA-Z0-9._-]*|*.) error 'invalid instance' ;; esac ;;
+    *) error 'invalid instance' ;;
+esac
+[ "${#instance}" -le 64 ] || error 'instance is too long'
+if [ "$no_runtime" = 0 ]; then
+    case $runtime_dir in /*) ;; *) error 'runtime-dir must be absolute' ;; esac
+fi
+[ -z "$group" ] || [ "$no_runtime" = 0 ] || error '--group requires --runtime-dir'
+case $duration in
+    -) ;;
+    ''|0|0*|*[!0-9]*) error 'duration must be positive decimal seconds or -' ;;
+esac
+
+# Channel suffix @TSID is an adapter notation for mirakc's single channel field.
+case $channel in
+    *@*)
+        [ -z "$selection" ] || error 'satellite selection specified twice'
+        selection=--tsid
+        selection_value=${channel#*@}
+        channel=${channel%%@*} ;;
+esac
+case $type in
+    GR)
+        [ -z "$selection" ] || error 'GR cannot select a satellite stream'
+        case $channel in [0-9][0-9]) channel=T$channel ;; esac
+        case $channel in T1[3-9]|T[2-5][0-9]|T6[0-2]) ;; *) error 'GR channel must be T13..T62' ;; esac
+        system=isdb-t ;;
+    BS)
+        case $channel in
+            *_*)
+                [ -z "$selection" ] || error 'satellite selection specified twice'
+                selection=--slot
+                selection_value=${channel#*_}
+                channel=${channel%%_*} ;;
+        esac
+        case $channel in BS01|BS03|BS05|BS07|BS09|BS11|BS13|BS15|BS17|BS19|BS21|BS23) ;;
+            *) error 'BS channel must be an odd BS01..BS23 transponder' ;; esac
+        [ -n "$selection" ] || error 'BS requires a slot or TSID'
+        system=isdb-s ;;
+    CS)
+        case $channel in
+            *_*)
+                [ -z "$selection" ] || error 'satellite selection specified twice'
+                selection=--slot
+                selection_value=${channel#*_}
+                channel=${channel%%_*} ;;
+        esac
+        case $channel in CS02|CS04|CS06|CS08|CS10|CS12|CS14|CS16|CS18|CS20|CS22|CS24) ;;
+            *) error 'CS channel must be an even CS02..CS24 transponder' ;; esac
+        [ -n "$selection" ] || error 'CS requires an explicit slot or TSID'
+        system=isdb-s ;;
+esac
+case $selection in
+    --slot) case $selection_value in [0-7]) ;; *) error 'DT295 satellite slot must be 0..7' ;; esac ;;
+    --tsid)
+        case $selection_value in ''|0|0*|*[!0-9]*) error 'TSID must be decimal 1..65534' ;; esac
+        [ "${#selection_value}" -le 5 ] || error 'TSID must be decimal 1..65534'
+        [ "$selection_value" -le 65534 ] || error 'TSID must be decimal 1..65534' ;;
+esac
+
+pix_ts=${PIX_TS_BIN:-pix-ts}
+set -- --instance "$instance" --system "$system" --channel "$channel" --time "$duration" --output -
+if [ "$no_runtime" = 0 ]; then set -- "$@" --runtime-dir "$runtime_dir"; fi
+if [ -n "$group" ]; then set -- "$@" --group; fi
+if [ -n "$selection" ]; then set -- "$@" "$selection" "$selection_value"; fi
+exec "$pix_ts" "$@"

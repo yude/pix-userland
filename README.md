@@ -9,6 +9,8 @@ pix-userland は、ピクセラ製 USB チューナー向けのユーザー空�
 
 `pix-ts` は選択した伝送ストリームを 188 バイトの MPEG-TS パケットとして出力します。PIX CARD 機能は内部カードの挿入状態照会に限られ、内蔵 IC カードリーダー／PC/SC API の制御や、ソフトウェアによる B25 / MULTI2 デスクランブル機能は備えていません。特定サービスの分離、予約録画、GUI、ブラウザからの WebUSB 制御も未実装です。
 
+PIX-DT295 と mirakc の連携例、合成TS/IPCテスト、実機検証手順は [integrations/mirakc/README.md](integrations/mirakc/README.md) にあります。この統合のDT295実機検証は未実施です。
+
 ## 配布コマンド（pixd / pixctl / pix-ts）
 
 配布アーカイブに入る公開コマンドは次の3つです（Windows 向けパッケージは `.exe`）。

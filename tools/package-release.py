@@ -14,9 +14,10 @@ TOP_FILES = {'Makefile', 'README.md', 'LICENSE', 'COPYING.libusb', 'THIRD_PARTY_
              'pix-dt181-consumer.cpp', 'pix-dt181-consumer.h', 'pix-dt181-receiver-adapter.cpp', 'pix-dt181-receiver-adapter.h',
              'pix-dt295-receiver-adapter.cpp', 'pix-dt295-receiver-adapter.h'}
 EXTENSIONS = {'.c', '.h', '.cpp', '.sh', '.py', '.md', '.json', '.yml', '.rules', '.conf'}
-SOURCE_DIRS = {'include','src','tests','tools','packaging','docs','.github','licenses','core-integration','assets'}
+SOURCE_DIRS = {'include','src','tests','tools','packaging','docs','.github','licenses','core-integration','integrations','assets'}
 
 SOURCE_EXTRA = {'packaging/pix-usb-permissions', 'core-integration/CMakeLists.txt', 'core-integration/dtv-userland-core.revision',
+                'integrations/mirakc/pix-mirakc-tuner', 'integrations/mirakc/pixd.service.example',
                 'assets/fpga.bin', 'assets/bootstrap.bin', 'assets/validation.bin', 'assets/dt295.assets'}
 DT181_ASSETS = ('fpga.bin', 'bootstrap.bin', 'validation.bin')
 DT181_SIZES = {'fpga.bin': 699673, 'bootstrap.bin': 16, 'validation.bin': 64}
