@@ -1,0 +1,4 @@
+# Copy to /etc/default/pixd. Use a selector reported by pixd --list-json.
+# A stable USB port selector (usb:1-2.3) can be used instead of a serial.
+PIX_DEVICE=serial:REPLACE_WITH_YOUR_SERIAL
+PIX_INSTANCE=dt295

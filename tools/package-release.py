@@ -18,6 +18,7 @@ EXTENSIONS = {'.c', '.h', '.cpp', '.sh', '.py', '.md', '.json', '.yml', '.rules'
 SOURCE_DIRS = {'include','src','tests','tools','packaging','docs','.github','licenses','core-integration','firmware'}
 
 SOURCE_EXTRA = {'packaging/pix-usb-permissions', 'core-integration/CMakeLists.txt', 'core-integration/dtv-userland-core.revision',
+                'packaging/systemd/pixd.service', 'packaging/systemd/pixd.default.example',
                 'packaging/pix-termux',
                 'firmware/dt181.bin', 'firmware/dt295.bin', 'firmware/preserved/verified-ts-iv.bin'}
 DT181_PROVENANCE = 'StationTV/Pixela device data; not covered by the PIX MIT license'
