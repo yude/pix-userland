@@ -82,8 +82,6 @@
 
 ### Linux: USB デバイスのアクセス権限設定
 
-DebianホストでPIX-DT295の `pixd` を常駐させる場合は、[systemd unitと導入手順](packaging/systemd/README.md)を参照してください。mirakcコンテナとのIPC共有にも対応しています。
-
 Linux で一般ユーザーが USB チューナーにアクセスするには、USB デバイスノードへのアクセス権限が必要です。
 
 #### udev の設定例

@@ -1,0 +1,26 @@
+# 複数台向け: pixd@.service を /etc/systemd/system/ にインストールして使う。
+# 1台につき1ファイル。例えば2台なら次のように準備する:
+#   sudo install -m 0644 pixd@.service /etc/systemd/system/
+#   sudo install -m 0644 pixd-instance.default.example /etc/default/pixd-dt295-a
+#   sudo install -m 0644 pixd-instance.default.example /etc/default/pixd-dt295-b
+#   sudoedit /etc/default/pixd-dt295-a /etc/default/pixd-dt295-b
+#
+# /etc/default/pixd-dt295-a の設定例（portは実際の一覧に合わせる）:
+#   PIX_DEVICE=usb:1-8.2
+# /etc/default/pixd-dt295-b の設定例:
+#   PIX_DEVICE=usb:1-8.3
+# 取得済みのserialがあれば PIX_DEVICE=serial:その値 でも指定できる。
+# 下のREPLACE_BUS-PORTを、各ファイルで異なる機器のportに変更する。
+PIX_DEVICE=usb:REPLACE_BUS-PORT
+#
+# 設定後に起動する:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now pixd@dt295-a.service pixd@dt295-b.service
+#
+# instance名はサービスの @ と .service の間から自動設定される。
+# PIX_INSTANCE の設定は不要。名前は英数字で始め、英数字・_・-を使う。
+# それぞれの接続先（mirakcのチューナーコマンドにも同じ値を指定する）:
+#   pixctl --instance dt295-a --runtime-dir /run/pixd-dt295-a --group status
+#   pixctl --instance dt295-b --runtime-dir /run/pixd-dt295-b --group status
+# コンテナへは /run/pixd-dt295-a と /run/pixd-dt295-b を個別に共有する。
+# /run/pixd は単体用pixd.serviceの接続先なので、この構成には使わない。

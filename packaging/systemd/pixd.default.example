@@ -1,4 +1,15 @@
-# Copy to /etc/default/pixd. Use a selector reported by pixd --list-json.
-# A stable USB port selector (usb:1-2.3) can be used instead of a serial.
-PIX_DEVICE=serial:REPLACE_WITH_YOUR_SERIAL
+# 1台だけを pixd.service で起動する場合:
+#   sudo install -m 0644 pixd.default.example /etc/default/pixd
+#   sudoedit /etc/default/pixd
+#   sudo systemctl enable --now pixd.service
+#
+# PIX_DEVICE は1台分だけ指定する。空白・カンマで複数台を並べない。
+# sudo pixd --list-json の port が "1-8.2" なら usb:1-8.2 を指定する。
+# serial が取得できている機器なら serial:その値 も使用できる。
+# 下のREPLACE_BUS-PORTを実際のportに変更してから起動する。
+PIX_DEVICE=usb:REPLACE_BUS-PORT
 PIX_INSTANCE=dt295
+#
+# 複数台は pixd@.service と pixd-instance.default.example を使い、
+# 1台につき1つの設定ファイル・サービスを作る（同ファイル内の例を参照）。
+# 同じ機器を pixd.service と pixd@.service の両方で起動しない。

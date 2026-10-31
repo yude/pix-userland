@@ -1,0 +1,31 @@
+[Unit]
+Description=PIX USB tuner daemon (%i)
+Documentation=https://github.com/Khronos31/pix-userland
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=root
+Group=video
+EnvironmentFile=/etc/default/pixd-%i
+ExecStart=/usr/local/bin/pixd --device ${PIX_DEVICE} --instance %i --runtime-dir /run/pixd-%i --group
+RuntimeDirectory=pixd-%i
+RuntimeDirectoryMode=0770
+RuntimeDirectoryPreserve=restart
+UMask=0007
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target
