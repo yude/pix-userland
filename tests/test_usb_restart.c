@@ -14,6 +14,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <sys/stat.h>
+/* Never consult the host's actual sysfs from the USB fixture. */
+static const char *test_serial_sysfs_root;
+#define PIX_USB_SERIAL_SYSFS_ROOT test_serial_sysfs_root
+#endif
 #include "usb_log.h"
 static struct libusb_transfer *LIBUSB_CALL test_alloc(int);
 static void LIBUSB_CALL test_free(struct libusb_transfer *);
@@ -140,6 +146,7 @@ static struct timespec fake_monotonic;
 typedef struct { uint16_t product; uint8_t bus, address, port; const char *serial; } fake_usb_device;
 static fake_usb_device fake_devices[2] = {{0x102b, 1, 7, 2, NULL}, {0x103b, 1, 8, 3, NULL}};
 static unsigned fake_device_count = 1;
+static int nested_test_ports;
 static libusb_device *last_opened_device;
 static const char *opened_serial;
 static int string_result;
@@ -214,7 +221,9 @@ static void record_open_order(char operation) {
         open_order[open_order_count++] = operation;
 }
 static int LIBUSB_CALL test_ports(libusb_device *d, uint8_t *p, int n) {
-    assert(n >= 1); *p = ((fake_usb_device *)d)->port; return 1;
+    assert(n >= 1); *p = ((fake_usb_device *)d)->port;
+    if (nested_test_ports) { assert(n >= 2); p[1] = 2; return 2; }
+    return 1;
 }
 static int LIBUSB_CALL test_open(libusb_device *d, libusb_device_handle **h) {
     last_opened_device = d;
@@ -757,10 +766,140 @@ static void dt295_model_selection(void) {
     list_result = 1;
     descriptor_product = 0x102b;
 }
+#ifdef __linux__
+static void serial_attribute(const char *root, unsigned port, const char *name,
+                             const char *value) {
+    char path[512];
+    assert(snprintf(path, sizeof(path), "%s/1-%u%s/%s", root, port,
+                    nested_test_ports ? ".2" : "", name) > 0);
+    FILE *file = fopen(path, "wb"); assert(file);
+    assert(fwrite(value, 1, strlen(value), file) == strlen(value));
+    assert(!fclose(file));
+}
+static void cached_serial_tests(void) {
+    char root[] = "/tmp/pix-usb-serial-XXXXXX";
+    assert(mkdtemp(root));
+    test_serial_sysfs_root = root;
+    fake_devices[0] = (fake_usb_device){0x103b, 1, 9, 4, NULL};
+    fake_devices[1] = (fake_usb_device){0x103b, 1, 8, 5, NULL};
+    fake_device_count = 2; list_result = 2;
+    for (unsigned port = 4; port <= 5; ++port) {
+        char path[512];
+        snprintf(path, sizeof(path), "%s/1-%u", root, port);
+        assert(!mkdir(path, 0700));
+        serial_attribute(root, port, "busnum", "1\n");
+        serial_attribute(root, port, "devnum", port == 4 ? "9\n" : "8\n");
+        serial_attribute(root, port, "idVendor", "06b8\n");
+        serial_attribute(root, port, "idProduct", "103b\n");
+        serial_attribute(root, port, "serial", port == 4 ? "SYNTH-A\n" : "SYNTH-B\n");
+    }
+    usb_device_info info;
+    device_info((libusb_device *)&fake_devices[0], 0, USB_MODEL_DT295, 1, &info);
+    assert(info.serial_state == USB_SERIAL_READABLE && !strcmp(info.serial, "SYNTH-A"));
+    usb_selector selector;
+    usb_backend *backend = NULL;
+    assert(!usb_selector_parse("serial:SYNTH-B", &selector));
+    assert(!usb_open_model(&backend, &selector, -1, 0, USB_MODEL_DT295));
+    assert(last_opened_device == (libusb_device *)&fake_devices[1]);
+    usb_close(backend);
+    /* USB port selectors still select the same physical device. */
+    assert(!usb_selector_parse("usb:1-4", &selector));
+    assert(!usb_open_model(&backend, &selector, -1, 0, USB_MODEL_DT295));
+    assert(last_opened_device == (libusb_device *)&fake_devices[0]);
+    usb_close(backend);
+    /* A successful descriptor remains authoritative over a different cache. */
+    fake_devices[0].serial = "DESCRIPTOR-A";
+    device_info((libusb_device *)&fake_devices[0], 0, USB_MODEL_DT295, 1, &info);
+    assert(!strcmp(info.serial, "DESCRIPTOR-A"));
+    string_result = LIBUSB_ERROR_IO;
+    device_info((libusb_device *)&fake_devices[0], 0, USB_MODEL_DT295, 1, &info);
+    assert(info.serial_state == USB_SERIAL_READABLE && !strcmp(info.serial, "SYNTH-A"));
+    string_result = 0;
+    open_result = LIBUSB_ERROR_ACCESS;
+    device_info((libusb_device *)&fake_devices[0], 0, USB_MODEL_DT295, 1, &info);
+    assert(info.serial_state == USB_SERIAL_READABLE && !strcmp(info.serial, "SYNTH-A"));
+    open_result = 0;
+    fake_devices[0].serial = NULL;
+    /* Cache identity must match every field; stale addresses cannot identify a replacement. */
+    const char *names[] = {"busnum", "devnum", "idVendor", "idProduct"};
+    const char *values[] = {"1\n", "9\n", "06b8\n", "103b\n"};
+    for (unsigned i = 0; i < 4; ++i) {
+        serial_attribute(root, 4, names[i], "0\n");
+        device_info((libusb_device *)&fake_devices[0], 0, USB_MODEL_DT295, 1, &info);
+        assert(info.serial_state == USB_SERIAL_ABSENT && !info.serial[0]);
+        serial_attribute(root, 4, names[i], values[i]);
+    }
+    const char *invalid[] = {"", "\n", "bad serial\n", "bad\nserial\n", "bad\001\n"};
+    for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
+        serial_attribute(root, 4, "serial", invalid[i]);
+        device_info((libusb_device *)&fake_devices[0], 0, USB_MODEL_DT295, 1, &info);
+        assert(info.serial_state == USB_SERIAL_ABSENT && !info.serial[0]);
+    }
+    char oversized[USB_SERIAL_MAX + 1];
+    memset(oversized, 'X', USB_SERIAL_MAX - 1);
+    oversized[USB_SERIAL_MAX - 1] = '\n'; oversized[USB_SERIAL_MAX] = 0;
+    serial_attribute(root, 4, "serial", oversized);
+    device_info((libusb_device *)&fake_devices[0], 0, USB_MODEL_DT295, 1, &info);
+    assert(info.serial_state == USB_SERIAL_READABLE && strlen(info.serial) == USB_SERIAL_MAX - 1);
+    memset(oversized, 'X', sizeof(oversized) - 1); oversized[sizeof(oversized) - 1] = 0;
+    serial_attribute(root, 4, "serial", oversized);
+    device_info((libusb_device *)&fake_devices[0], 0, USB_MODEL_DT295, 1, &info);
+    assert(info.serial_state == USB_SERIAL_ABSENT && !info.serial[0]);
+    serial_attribute(root, 4, "serial", "SYNTH-B\n");
+    assert(!usb_selector_parse("serial:SYNTH-B", &selector));
+    assert(usb_open_model(&backend, &selector, -1, 0, USB_MODEL_DT295) == 3 && !backend);
+    for (unsigned port = 4; port <= 5; ++port) {
+        char path[512];
+        const char *attributes[] = {"busnum", "devnum", "idVendor", "idProduct", "serial"};
+        for (unsigned i = 0; i < 5; ++i) {
+            snprintf(path, sizeof(path), "%s/1-%u/%s", root, port, attributes[i]);
+            assert(!unlink(path));
+        }
+        snprintf(path, sizeof(path), "%s/1-%u", root, port);
+        assert(!rmdir(path));
+    }
+    /* A missing cache must preserve null/unreadable semantics, not guess a device. */
+    device_info((libusb_device *)&fake_devices[0], 0, USB_MODEL_DT295, 1, &info);
+    assert(info.serial_state == USB_SERIAL_ABSENT);
+    fake_devices[0].serial = "DESCRIPTOR-A";
+    string_result = LIBUSB_ERROR_IO;
+    device_info((libusb_device *)&fake_devices[0], 0, USB_MODEL_DT295, 1, &info);
+    assert(info.serial_state == USB_SERIAL_UNREADABLE);
+    string_result = 0;
+    fake_devices[0].serial = NULL;
+    /* Nested hub ports use the same topology as the production sysfs path. */
+    nested_test_ports = 1;
+    char nested[512];
+    snprintf(nested, sizeof(nested), "%s/1-4.2", root);
+    assert(!mkdir(nested, 0700));
+    for (unsigned i = 0; i < 4; ++i)
+        serial_attribute(root, 4, names[i], values[i]);
+    serial_attribute(root, 4, "serial", "SYNTH-NESTED\n");
+    assert(!usb_selector_parse("serial:SYNTH-NESTED", &selector));
+    assert(!usb_open_model(&backend, &selector, -1, 0, USB_MODEL_DT295));
+    assert(last_opened_device == (libusb_device *)&fake_devices[0]);
+    usb_close(backend);
+    for (unsigned i = 0; i < 4; ++i) {
+        char path[512];
+        snprintf(path, sizeof(path), "%s/1-4.2/%s", root, names[i]);
+        assert(!unlink(path));
+    }
+    char serial_path[512];
+    snprintf(serial_path, sizeof(serial_path), "%s/1-4.2/serial", root);
+    assert(!unlink(serial_path)); assert(!rmdir(nested));
+    nested_test_ports = 0;
+    assert(!rmdir(root)); test_serial_sysfs_root = NULL;
+    fake_devices[0] = (fake_usb_device){0x102b, 1, 7, 2, NULL};
+    fake_device_count = 1; list_result = 1;
+}
+#endif
 int main(void) {
     configuration_tests();
     open_tests();
     failure_tests();
+#ifdef __linux__
+    cached_serial_tests();
+#endif
     usb_backend *b = calloc(1, sizeof(*b));
     assert(b);
     b->diagnostic = 1;

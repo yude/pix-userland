@@ -1,6 +1,7 @@
 #include "usb_backend.h"
 #include "usb_log.h"
 #include "usb_listing.h"
+#include "usb_serial.h"
 #include <libusb.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -122,33 +123,110 @@ static int model_state(libusb_device *d) {
     return desc.idProduct == 0x102b ? USB_MODEL_DT181 :
            desc.idProduct == 0x103b ? USB_MODEL_DT295 : 0;
 }
-/* Reads the descriptor serial without claiming an interface. A missing serial
- * number is absent; an open or read failure is unreadable, never an empty
- * string, so callers can distinguish unknown from a real empty value. */
-static void read_serial(libusb_device *device, usb_device_info *out) {
+#ifdef __linux__
+#ifndef PIX_USB_SERIAL_SYSFS_ROOT
+#define PIX_USB_SERIAL_SYSFS_ROOT "/sys/bus/usb/devices"
+#endif
+static int serial_sysfs_number(const char *directory, const char *name,
+                              unsigned base, unsigned expected) {
+    char path[512], text[64], *end = NULL;
+    int length = snprintf(path, sizeof(path), "%s/%s", directory, name);
+    if (length < 0 || (size_t)length >= sizeof(path)) return 0;
+    FILE *file = fopen(path, "r");
+    if (!file) return 0;
+    int ok = fgets(text, sizeof(text), file) != NULL && !ferror(file);
+    fclose(file);
+    if (!ok) return 0;
+    unsigned long value = strtoul(text, &end, (int)base);
+    return end != text && (*end == '\0' || (*end == '\n' && end[1] == '\0')) &&
+           value == expected;
+}
+static int serial_sysfs_identity(const char *path, libusb_device *device,
+                                const struct libusb_device_descriptor *desc) {
+    return serial_sysfs_number(path, "busnum", 10, libusb_get_bus_number(device)) &&
+           serial_sysfs_number(path, "devnum", 10, libusb_get_device_address(device)) &&
+           serial_sysfs_number(path, "idVendor", 16, desc->idVendor) &&
+           serial_sysfs_number(path, "idProduct", 16, desc->idProduct);
+}
+/* The kernel can retain the real descriptor serial even when a later USB
+ * string request fails. Bind the cache to this bus/port/address and VID:PID;
+ * never infer an identity from enumeration order or from a product label. */
+static int read_cached_serial(libusb_device *device,
+                              const struct libusb_device_descriptor *desc,
+                              char *out, size_t capacity) {
+    uint8_t ports[USB_SELECTOR_MAX_PORTS];
+    int count = libusb_get_port_numbers(device, ports, sizeof(ports));
+    const char *root = PIX_USB_SERIAL_SYSFS_ROOT;
+    if (!root || count <= 0 || count > (int)sizeof(ports)) return 0;
+    char directory[512], path[512];
+    int length = snprintf(directory, sizeof(directory), "%s/%u", root,
+                          libusb_get_bus_number(device));
+    if (length < 0 || (size_t)length >= sizeof(directory)) return 0;
+    size_t used = (size_t)length;
+    for (int i = 0; i < count; ++i) {
+        length = snprintf(directory + used, sizeof(directory) - used,
+                          "%c%u", i ? '.' : '-', ports[i]);
+        if (!ports[i] || length < 0 || (size_t)length >= sizeof(directory) - used)
+            return 0;
+        used += (size_t)length;
+    }
+    if (!serial_sysfs_identity(directory, device, desc)) return 0;
+    length = snprintf(path, sizeof(path), "%s/serial", directory);
+    if (length < 0 || (size_t)length >= sizeof(path)) return 0;
+    FILE *file = fopen(path, "rb");
+    if (!file) return 0;
+    size_t size = fread(out, 1, capacity, file);
+    int extra = fgetc(file);
+    int failed = ferror(file);
+    fclose(file);
+    if (failed || extra != EOF || !size) return 0;
+    if (out[size - 1] == '\n') --size;
+    if (!size || size >= capacity) return 0;
+    for (size_t i = 0; i < size; ++i)
+        if ((unsigned char)out[i] < 0x21U || (unsigned char)out[i] > 0x7eU)
+            return 0;
+    out[size] = '\0';
+    return serial_sysfs_identity(directory, device, desc);
+}
+#endif
+
+/* Preserve successful USB descriptor reads on all platforms. Linux alone may
+ * supplement an absent/unreadable string with the kernel's matching cache. */
+usb_serial_state usb_device_read_serial(libusb_device *device, char *out, size_t capacity,
+                                        size_t *serial_length) {
+    if (serial_length) *serial_length = 0;
+    if (!device || !out || capacity < 2 || capacity > 65535U)
+        return USB_SERIAL_UNREADABLE;
+    out[0] = '\0';
     struct libusb_device_descriptor desc;
-    if (libusb_get_device_descriptor(device, &desc) < 0) {
-        out->serial_state = USB_SERIAL_UNREADABLE;
-        return;
+    if (libusb_get_device_descriptor(device, &desc) < 0)
+        return USB_SERIAL_UNREADABLE;
+    usb_serial_state state = USB_SERIAL_ABSENT;
+    if (desc.iSerialNumber) {
+        state = USB_SERIAL_UNREADABLE;
+        libusb_device_handle *handle = NULL;
+        if (libusb_open(device, &handle) >= 0 && handle) {
+            int length = libusb_get_string_descriptor_ascii(handle, desc.iSerialNumber,
+                (unsigned char *)out, (int)(capacity > 256U ? 256U : capacity));
+            libusb_close(handle);
+            if (length > 0 && (size_t)length < capacity) {
+                out[length] = '\0';
+                if (serial_length) *serial_length = (size_t)length;
+                return USB_SERIAL_READABLE;
+            }
+        }
     }
-    if (!desc.iSerialNumber)
-        return;
-    libusb_device_handle *handle = NULL;
-    if (libusb_open(device, &handle) < 0 || !handle) {
-        out->serial_state = USB_SERIAL_UNREADABLE;
-        return;
+#ifdef __linux__
+    if (read_cached_serial(device, &desc, out, capacity)) {
+        if (serial_length) *serial_length = strlen(out);
+        return USB_SERIAL_READABLE;
     }
-    unsigned char text[USB_SERIAL_MAX];
-    int length = libusb_get_string_descriptor_ascii(handle, desc.iSerialNumber, text,
-                                                   sizeof(text));
-    libusb_close(handle);
-    if (length <= 0 || (size_t)length >= sizeof(text)) {
-        out->serial_state = USB_SERIAL_UNREADABLE;
-        return;
-    }
-    memcpy(out->serial, text, (size_t)length);
-    out->serial[length] = 0;
-    out->serial_state = USB_SERIAL_READABLE;
+#endif
+    out[0] = '\0';
+    return state;
+}
+static void read_serial(libusb_device *device, usb_device_info *out) {
+    out->serial_state = usb_device_read_serial(device, out->serial, sizeof(out->serial), NULL);
 }
 static void device_info(libusb_device *device, unsigned index, int model, int serial,
                         usb_device_info *out) {

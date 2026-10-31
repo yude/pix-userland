@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "pix_runtime.h"
+#include "src/usb_serial.h"
 
 #include <dtv/userland/host_listener_context/enclosure_context.h>
 #include <dtv/userland/host_runtime/control_socket.h>
@@ -245,26 +246,19 @@ int write_discovery_json()
         device.device = static_cast<std::uint16_t>(devices.size());
         device.vid = desc.idVendor;
         device.pid = desc.idProduct;
-        if (desc.iSerialNumber != 0U) {
-            libusb_device_handle* handle = nullptr;
-            if (libusb_open(usb, &handle) == LIBUSB_SUCCESS && handle) {
-                unsigned char characters[256]{};
-                const int length = libusb_get_string_descriptor_ascii(
-                    handle, desc.iSerialNumber, characters, sizeof(characters));
-                if (length > 0 &&
-                    static_cast<std::size_t>(length) <= device.serial.value.bytes.size()) {
-                    bool valid = true;
-                    for (int n = 0; n < length; ++n)
-                        if (characters[n] < 0x21U || characters[n] > 0x7eU)
-                            valid = false;
-                    if (valid) {
-                        device.serial.present = true;
-                        device.serial.value.length = static_cast<std::uint16_t>(length);
-                        std::memcpy(device.serial.value.bytes.data(), characters,
-                                    static_cast<std::size_t>(length));
-                    }
-                }
-                libusb_close(handle);
+        char characters[257]{};
+        std::size_t length = 0U;
+        if (usb_device_read_serial(usb, characters, sizeof(characters), &length) ==
+                USB_SERIAL_READABLE && length <= device.serial.value.bytes.size()) {
+            bool valid = true;
+            for (std::size_t n = 0; n < length; ++n)
+                if (static_cast<unsigned char>(characters[n]) < 0x21U ||
+                    static_cast<unsigned char>(characters[n]) > 0x7eU)
+                    valid = false;
+            if (valid) {
+                device.serial.present = true;
+                device.serial.value.length = static_cast<std::uint16_t>(length);
+                std::memcpy(device.serial.value.bytes.data(), characters, length);
             }
         }
         device.location.bus = {true, libusb_get_bus_number(usb)};

@@ -221,6 +221,8 @@ termux-usb -r -e './packaging/pix-termux --system isdb-t --channel T27 --time 15
 - `--models`: 静的な対応機種一覧を表示します。
 - `--list-json`: 接続中の機器を JSON 形式で一覧表示します。
 
+`--device serial:VALUE` は `pixd --list-json` の `serial` に表示された値をそのまま指定します。LinuxではUSBシリアル記述子の読取りが失敗した場合、同じUSBポート・バス番号・デバイスアドレス・VID/PIDに対応するsysfsのシリアルで補完します。成功したUSB記述子の値を優先し、取得できない場合は従来どおり `serial: null` になります。同じシリアルを持つ候補が複数ある場合は曖昧な選択を拒否します。複数台は各機器のシリアルと別々の `--instance`・`--runtime-dir` で起動できます。`usb:BUS-PORT` 指定も引き続き利用できます。
+
 ※ 配布バイナリはファームウェアデータを内蔵しているため、通常利用で `--firmware` オプションは不要です。埋め込みを無効にしてビルドした場合（`PIX_EMBEDDED_ASSETS=OFF`）は `--firmware <FILE>` または `-F <FILE>` で対象機種の単一ファームウェアファイルを指定してください。指定されたファイルの内容が不正な場合や機種が一致しない場合は起動時にエラーとなり、内蔵データへのフォールバックは行われません。
 
 #### `pixctl`（制御・状態照会ツール）
